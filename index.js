@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -9,7 +10,6 @@ const cloudinary = require('cloudinary').v2;
 
 const fs = require('fs');
 const os = require('os');
-const path = require('path');
 const http = require('http');
 const app = express();
 let server = app;
@@ -227,6 +227,8 @@ const testRoutes = require('./routes/testRoutes');
 const assignmentRoutes = require('./routes/assignmentRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const aboutRoutes = require('./routes/aboutRoutes');
+const emailRoutes = require('./routes/emailRoutes');
+const { verifySMTP, sendContactAdminNotification, sendContactUserConfirmation } = require('./config/mailer');
 const About = require('./models/About');
 
 app.use('/api/auth', authRoutes);
@@ -237,6 +239,7 @@ app.use('/api/tests', testRoutes);
 app.use('/api/assignments', assignmentRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/about', aboutRoutes);
+app.use('/api/email', emailRoutes);
 
 // General Routes
 app.get('/', (req, res) => {
@@ -366,6 +369,15 @@ app.post('/api/contact', async (req, res) => {
   try {
     const newContact = new Contact(req.body);
     await newContact.save();
+
+    // Trigger SMTP email notifications asynchronously (non-blocking)
+    sendContactAdminNotification(newContact).catch(err => {
+      console.error('[SMTP] Failed to send contact notification to admin:', err.message);
+    });
+    sendContactUserConfirmation(newContact).catch(err => {
+      console.error('[SMTP] Failed to send contact confirmation to user:', err.message);
+    });
+
     res.status(201).json(newContact);
   } catch (error) {
     console.error("Contact Form Submission Error:", error);
@@ -1089,8 +1101,14 @@ app.use((err, req, res, next) => {
 
 // Start Server
 if (!process.env.VERCEL) {
-  server.listen(PORT, () => {
+  server.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
+    // Verify SMTP connection on startup
+    try {
+      await verifySMTP();
+    } catch (err) {
+      console.warn('[SMTP] Startup verification error:', err.message);
+    }
   });
 }
 
